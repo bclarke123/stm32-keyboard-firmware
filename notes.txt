@@ -1,0 +1,7 @@
+- Run `st-util`
+- `cargo run`, should drop you into gdb
+- `target extended-remote localhost:4242`
+- `load`
+- `continue`
+
+program should now be running
