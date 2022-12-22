@@ -3,17 +3,32 @@
 
 use panic_halt as _;
 
-use stm32f0xx_hal as hal;
-
-use hal::{delay::Delay, pac, prelude::*};
-use cortex_m::{ interrupt::free, peripheral::Peripherals };
 use cortex_m_rt::entry;
+use cortex_m::{ interrupt::free };
+
+use stm32f0xx_hal as hal;
+use hal::{prelude::*, pac, usb::Peripheral};
+
+use stm32_usbd::bus::UsbBus;
+use usb_device::prelude::*;
+use usbd_serial::{SerialPort, USB_CLASS_CDC};
+
+// use usbd_hid_device::{USB_CLASS_HID, Hid};
 
 #[entry]
 fn main() -> ! {
-    if let (Some(mut p), Some(cp)) = (pac::Peripherals::take(), Peripherals::take()) {
-        let mut rcc = p.RCC.configure().sysclk(48.mhz()).freeze(&mut p.FLASH);
+    if let Some(mut p) = pac::Peripherals::take() {
+        let mut rcc = p.RCC.configure()
+        .hsi48()
+        .enable_crs(p.CRS)
+        .sysclk(48.mhz())
+        .pclk(24.mhz())
+        .freeze(&mut p.FLASH);
+
         let gpioa = p.GPIOA.split(&mut rcc);
+
+        let pin_dm = gpioa.pa11;
+        let pin_dp = gpioa.pa12;
 
         let col1 = free(|cs| gpioa.pa0.into_push_pull_output(cs)).downgrade();
         let col2 = free(|cs| gpioa.pa1.into_push_pull_output(cs)).downgrade();
@@ -26,14 +41,31 @@ fn main() -> ! {
 
         let mut cols = [ col1, col2 ];
         let rows = [ row1, row2 ];
-
         let mut leds = [ led1, led2, led3, led4 ];
 
-        let mut delay = Delay::new(cp.SYST, &rcc);
+        let peripheral = Peripheral {
+            usb: p.USB,
+            pin_dm,
+            pin_dp
+        };
+
+        let usb_bus = UsbBus::new(peripheral);
+        let mut serial = SerialPort::new(&usb_bus);
+
+        let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+            .manufacturer("Ben Custom")
+            .product("Macro Breadboard")
+            .serial_number("TEST")
+            .device_class(USB_CLASS_CDC)
+            .build();
 
         loop {
 
+            usb_dev.poll(&mut [ &mut serial ]);
+
             let mut led_idx = 0;
+            let mut buf = [0u8; 5];
+            let mut send = false;
 
             for col in cols.iter_mut() {
 
@@ -43,6 +75,10 @@ fn main() -> ! {
 
                     let high = row.is_high().unwrap();
                     leds[led_idx].set_state(high.into()).unwrap();
+                    if high {
+                        buf[led_idx] = [ 'a', 's', 'd', 'f' ][led_idx] as u8;
+                        send = true;
+                    }
 
                     led_idx += 1;
 
@@ -52,9 +88,19 @@ fn main() -> ! {
 
             }
 
-            delay.delay_ms(50_u16);
+            buf[4] = '\n' as u8;
 
-            continue;
+            if send {
+                let mut write_offset = 0;
+                while write_offset < 4 {
+                    match serial.write(&buf[write_offset..]) {
+                        Ok(len) if len > 0 => {
+                            write_offset += len
+                        },
+                        _ => {}
+                    }
+                }
+            }
         }
     }
 

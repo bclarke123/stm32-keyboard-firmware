@@ -179,6 +179,7 @@ dependencies = [
  "stm32-usbd",
  "stm32f0xx-hal",
  "usb-device",
+ "usbd-hid-device",
  "usbd-serial",
 ]
 
@@ -217,6 +218,7 @@ dependencies = [
  "cortex-m",
  "embedded-hal",
  "nb 1.0.0",
+ "stm32-usbd",
  "stm32f0",
  "void",
 ]
@@ -243,6 +245,16 @@ name = "usb-device"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f6cc3adc849b5292b4075fc0d5fdcf2f24866e88e336dd27a8943090a520508"
+
+[[package]]
+name = "usbd-hid-device"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6458a7119d68e106afc404af6b3a641fa03ddeaa98cda9b68a65bf3db6a98dd"
+dependencies = [
+ "embedded-hal",
+ "usb-device",
+]
 
 [[package]]
 name = "usbd-serial"
