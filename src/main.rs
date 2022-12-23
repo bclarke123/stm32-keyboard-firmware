@@ -4,20 +4,38 @@
 use panic_halt as _;
 
 use cortex_m_rt::entry;
-use cortex_m::{ interrupt::free };
+use cortex_m::asm::delay as cycle_delay;
+use cortex_m::interrupt::free;
+use cortex_m::peripheral::NVIC;
 
 use stm32f0xx_hal as hal;
-use hal::{prelude::*, pac, usb::Peripheral};
+use hal::{prelude::*, pac, pac::interrupt, usb::Peripheral};
 
 use stm32_usbd::bus::UsbBus;
+use usb_device::class_prelude::UsbBusAllocator;
 use usb_device::prelude::*;
-use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-// use usbd_hid_device::{USB_CLASS_HID, Hid};
+use usbd_hid_device::USB_CLASS_HID;
+use usbd_hid::hid_class::HIDClass;
+use usbd_hid::descriptor::generator_prelude::*;
+use usbd_hid::descriptor::KeyboardReport;
+
+static mut USB_ALLOCATOR: Option<UsbBusAllocator<UsbBus<Peripheral>>> = None;
+static mut USB_BUS: Option<UsbDevice<UsbBus<Peripheral>>> = None;
+static mut USB_HID: Option<HIDClass<UsbBus<Peripheral>>> = None;
+
+#[interrupt]
+fn USB() {
+    unsafe {
+        if let (Some(usb_dev), Some(hid)) = (USB_BUS.as_mut(), USB_HID.as_mut()) {
+            usb_dev.poll(&mut [hid]);
+        }
+    };
+}
 
 #[entry]
 fn main() -> ! {
-    if let Some(mut p) = pac::Peripherals::take() {
+    if let (Some(mut p), Some(mut cp)) = (pac::Peripherals::take(), pac::CorePeripherals::take()) {
         let mut rcc = p.RCC.configure()
         .hsi48()
         .enable_crs(p.CRS)
@@ -43,29 +61,44 @@ fn main() -> ! {
         let rows = [ row1, row2 ];
         let mut leds = [ led1, led2, led3, led4 ];
 
-        let peripheral = Peripheral {
-            usb: p.USB,
-            pin_dm,
-            pin_dp
+        let usb_bus = unsafe {
+            USB_ALLOCATOR = Some(
+                UsbBus::new(Peripheral {
+                    usb: p.USB,
+                    pin_dm,
+                    pin_dp
+                })
+            );
+            USB_ALLOCATOR.as_ref().unwrap()
         };
 
-        let usb_bus = UsbBus::new(peripheral);
-        let mut serial = SerialPort::new(&usb_bus);
+        unsafe {
+            USB_HID = Some(HIDClass::new(&usb_bus, KeyboardReport::desc(), 60));
+            USB_BUS = Some(UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+                .manufacturer("Ben Custom")
+                .product("Macro Breadboard")
+                .serial_number("TEST")
+                .device_class(USB_CLASS_HID)
+                .build());
+        }
 
-        let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
-            .manufacturer("Ben Custom")
-            .product("Macro Breadboard")
-            .serial_number("TEST")
-            .device_class(USB_CLASS_CDC)
-            .build();
-
+        unsafe {
+            cp.NVIC.set_priority(interrupt::USB, 1);
+            NVIC::unmask(interrupt::USB);
+        }
+        
         loop {
-
-            usb_dev.poll(&mut [ &mut serial ]);
-
+            cycle_delay(25 * 1024 * 1024);
+            
             let mut led_idx = 0;
-            let mut buf = [0u8; 5];
-            let mut send = false;
+            let mut code_idx = 0;
+            
+            let mut report = KeyboardReport {
+                modifier: 0,
+                leds: 0,
+                reserved: 0,
+                keycodes: [ 0u8; 6 ]
+            };
 
             for col in cols.iter_mut() {
 
@@ -75,9 +108,16 @@ fn main() -> ! {
 
                     let high = row.is_high().unwrap();
                     leds[led_idx].set_state(high.into()).unwrap();
+
                     if high {
-                        buf[led_idx] = [ 'a', 's', 'd', 'f' ][led_idx] as u8;
-                        send = true;
+                        report.keycodes[code_idx] = [
+                            0x04,
+                            0x16,
+                            0x07,
+                            0x09,
+                        ][led_idx];
+
+                        code_idx += 1;
                     }
 
                     led_idx += 1;
@@ -88,19 +128,7 @@ fn main() -> ! {
 
             }
 
-            buf[4] = '\n' as u8;
-
-            if send {
-                let mut write_offset = 0;
-                while write_offset < 4 {
-                    match serial.write(&buf[write_offset..]) {
-                        Ok(len) if len > 0 => {
-                            write_offset += len
-                        },
-                        _ => {}
-                    }
-                }
-            }
+            free(|_| unsafe { USB_HID.as_mut().map(|hid| hid.push_input(&report)).unwrap() }).unwrap();
         }
     }
 
