@@ -15,8 +15,3 @@ usbd-serial = "0.1.1"
 stm32-usbd = { version = "0.6.0"}
 usbd-hid-device = "0.1.1"
 usbd-hid = "0.6.1"
-
-[profile.release]
-opt-level = 3
-debug = 0
-strip = true

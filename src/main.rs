@@ -4,12 +4,11 @@
 use panic_halt as _;
 
 use cortex_m_rt::entry;
-use cortex_m::asm::delay as cycle_delay;
 use cortex_m::interrupt::free;
 use cortex_m::peripheral::NVIC;
 
 use stm32f0xx_hal as hal;
-use hal::{prelude::*, pac, pac::interrupt, usb::Peripheral};
+use hal::{prelude::*, delay::Delay, pac, pac::interrupt, usb::Peripheral};
 
 use stm32_usbd::bus::UsbBus;
 use usb_device::class_prelude::UsbBusAllocator;
@@ -86,9 +85,11 @@ fn main() -> ! {
             cp.NVIC.set_priority(interrupt::USB, 1);
             NVIC::unmask(interrupt::USB);
         }
+
+        let mut delay = Delay::new(cp.SYST, &rcc);
         
         loop {
-            cycle_delay(25 * 1024 * 1024);
+            delay.delay_ms(50u16);
             
             let mut led_idx = 0;
             let mut code_idx = 0;
@@ -111,10 +112,14 @@ fn main() -> ! {
 
                     if high {
                         report.keycodes[code_idx] = [
-                            0x04,
-                            0x16,
-                            0x07,
-                            0x09,
+                            0x05,
+                            0x08,
+                            0x11,
+                            0x1e,
+                        ][led_idx];
+
+                        report.modifier = [
+                            0, 0, 0, 0x02
                         ][led_idx];
 
                         code_idx += 1;
