@@ -74,7 +74,7 @@ fn main() -> ! {
 
         unsafe {
             USB_HID = Some(HIDClass::new(&usb_bus, KeyboardReport::desc(), 60));
-            USB_BUS = Some(UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+            USB_BUS = Some(UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0xbe17, 0xc1a2))
                 .manufacturer("Ben Custom")
                 .product("Macro Breadboard")
                 .serial_number("TEST")
@@ -87,20 +87,29 @@ fn main() -> ! {
             NVIC::unmask(interrupt::USB);
         }
 
-        cycle_delay(25 * 1024 * 1024);
+        for led in &mut leds {
+            led.set_low().unwrap();
+        }
+
+        let mut prev_codes = [0u8; 6];
+        let mut prev_mod = 0u8;
+
+        let mut report = KeyboardReport {
+            modifier: 0,
+            leds: 0,
+            reserved: 0,
+            keycodes: [ 0u8; 6 ]
+        };
 
         loop {
+
             cycle_delay(1024 * 1024);
-            
+
             let mut led_idx = 0;
             let mut code_idx = 0;
-            
-            let mut report = KeyboardReport {
-                modifier: 0,
-                leds: 0,
-                reserved: 0,
-                keycodes: [ 0u8; 6 ]
-            };
+
+            report.modifier = 0;
+            report.keycodes.fill(0);
 
             for col in cols.iter_mut() {
 
@@ -134,7 +143,21 @@ fn main() -> ! {
 
             }
 
-            free(|_| unsafe { USB_HID.as_mut().map(|hid| hid.push_input(&report)) }).unwrap().ok().unwrap_or(0);
+            if report.keycodes == prev_codes && report.modifier == prev_mod {
+                continue;
+            }
+
+            prev_codes[..].copy_from_slice(&report.keycodes);
+            prev_mod = report.modifier;
+
+            match free(|_| unsafe { USB_HID.as_mut().map(|hid| hid.push_input(&report)) })
+                .unwrap() {
+                    Ok(_) => {},
+                    _ => {
+                        leds[1].set_high().unwrap();
+                        leds[2].set_high().unwrap();
+                    }
+                }
         }
     }
 
