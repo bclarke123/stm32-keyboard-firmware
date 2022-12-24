@@ -1,5 +1,5 @@
 [package]
-name = "stm-test"
+name = "ben-stm32-keyboard-firmware"
 version = "0.1.0"
 edition = "2021"
 
